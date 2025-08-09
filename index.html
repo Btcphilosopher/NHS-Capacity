@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NHS Capacity Crisis</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        
+        .game-container {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+        
+        .game-board {
+            position: relative;
+            background: rgba(255, 255, 255, 0.1);
+            border: 3px solid #00a8cc;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+            cursor: pointer;
+        }
+        
+        canvas {
+            display: block;
+            border-radius: 7px;
+            outline: none;
+        }
+        
+        .info-panel {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 20px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+            min-width: 200px;
+        }
+        
+        .score {
+            font-size: 18px;
+            margin-bottom: 10px;
+            color: #ffffff;
+        }
+        
+        .level {
+            font-size: 16px;
+            margin-bottom: 20px;
+            color: #b3d9ff;
+        }
+        
+        .next-piece {
+            margin-bottom: 20px;
+        }
+        
+        .next-canvas {
+            border: 2px solid #00a8cc;
+            border-radius: 5px;
+            background: rgba(0, 0, 0, 0.3);
+        }
+        
+        .controls {
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .privatization-indicator {
+            background: linear-gradient(45deg, #ff6b35, #f7931e);
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            text-align: center;
+            font-weight: bold;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        
+        .privatization-indicator.active {
+            opacity: 1;
+        }
+        
+        .game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            display: none;
+        }
+        
+        .restart-btn {
+            background: #00a8cc;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 15px;
+        }
+        
+        .restart-btn:hover {
+            background: #0088aa;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #ffffff;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        
+        .theme-text {
+            font-size: 12px;
+            color: #b3d9ff;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div>
+            <h1>NHS Capacity Crisis</h1>
+            <div class="game-board">
+                <canvas id="gameCanvas" width="300" height="600"></canvas>
+                <div class="game-over" id="gameOver">
+                    <h2>System Overwhelmed!</h2>
+                    <p>The NHS capacity has been exceeded.</p>
+                    <p id="finalScore">Final Score: 0</p>
+                    <button class="restart-btn" onclick="restartGame()">Try Again</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="info-panel">
+            <div class="theme-text">Manage NHS capacity by fitting patient demands efficiently!</div>
+            <div class="score">Patients Treated: <span id="score">0</span></div>
+            <div class="level">Demand Level: <span id="level">1</span></div>
+            
+            <div class="privatization-indicator" id="privatizationReady">
+                💰 PRIVATIZATION MAKES THINGS MORE EFFICIENT<br>
+                Clear your lines with this option<br>
+                <span id="privatizationCount">Available: 0</span><br>
+                Press SPACE to use
+            </div>
+            
+            <div class="next-piece">
+                <h3>Next Demand:</h3>
+                <canvas id="nextCanvas" width="80" height="80" class="next-canvas"></canvas>
+            </div>
+            
+            <div class="controls">
+                <h3>Controls:</h3>
+                <strong>← → ↑ ↓</strong> or <strong>A/D/W/S</strong><br>
+                Left/Right, Rotate, Soft drop<br>
+                <strong>SPACE</strong> - Privatization (when available)<br>
+                <em>Click on game to focus</em>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const nextCanvas = document.getElementById('nextCanvas');
+        const nextCtx = nextCanvas.getContext('2d');
+        
+        const COLS = 10;
+        const ROWS = 20;
+        const BLOCK_SIZE = 30;
+        
+        // NHS-themed colors
+        const COLORS = [
+            '#2E8B57', // Hospital Green
+            '#4682B4', // Medical Blue
+            '#DC143C', // Emergency Red
+            '#FF8C00', // Ambulance Orange
+            '#9370DB', // Specialist Purple
+            '#20B2AA', // Nurse Teal
+            '#FFD700'  // GP Gold
+        ];
+        
+        // Tetris pieces (Tetrominoes)
+        const PIECES = [
+            // I piece - "Emergency Corridor"
+            [[[1,1,1,1]]],
+            // O piece - "Waiting Room"
+            [[[1,1],[1,1]]],
+            // T piece - "Triage Unit"
+            [[[0,1,0],[1,1,1]]],
+            // S piece - "Surgery Wing"
+            [[[0,1,1],[1,1,0]]],
+            // Z piece - "ICU Block"
+            [[[1,1,0],[0,1,1]]],
+            // J piece - "Outpatient Clinic"
+            [[[1,0,0],[1,1,1]]],
+            // L piece - "Pharmacy Unit"
+            [[[0,0,1],[1,1,1]]]
+        ];
+        
+        let board = Array(ROWS).fill().map(() => Array(COLS).fill(0));
+        let score = 0;
+        let level = 1;
+        let lines = 0;
+        let currentPiece = null;
+        let nextPiece = null;
+        let gameRunning = true;
+        let dropTime = 0;
+        let dropInterval = 1000; // 1 second
+        let privatizationAvailable = 0; // Number of privatizations available
+        let privatizationCounter = 0;
+        
+        function generatePiece() {
+            const pieceIndex = Math.floor(Math.random() * PIECES.length);
+            const colorIndex = Math.floor(Math.random() * COLORS.length);
+            
+            return {
+                shape: PIECES[pieceIndex][0],
+                x: Math.floor(COLS / 2) - Math.floor(PIECES[pieceIndex][0][0].length / 2),
+                y: 0,
+                color: COLORS[colorIndex]
+            };
+        }
+        
+        function rotatePiece(piece) {
+            const rotated = [];
+            const rows = piece.shape.length;
+            const cols = piece.shape[0].length;
+            
+            for (let col = 0; col < cols; col++) {
+                rotated[col] = [];
+                for (let row = rows - 1; row >= 0; row--) {
+                    rotated[col][rows - 1 - row] = piece.shape[row][col];
+                }
+            }
+            
+            return {
+                ...piece,
+                shape: rotated
+            };
+        }
+        
+        function isValidPosition(piece, dx = 0, dy = 0) {
+            const newX = piece.x + dx;
+            const newY = piece.y + dy;
+            
+            for (let y = 0; y < piece.shape.length; y++) {
+                for (let x = 0; x < piece.shape[y].length; x++) {
+                    if (piece.shape[y][x]) {
+                        const boardX = newX + x;
+                        const boardY = newY + y;
+                        
+                        if (boardX < 0 || boardX >= COLS || boardY >= ROWS) {
+                            return false;
+                        }
+                        
+                        if (boardY >= 0 && board[boardY][boardX]) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            
+            return true;
+        }
+        
+        function placePiece() {
+            for (let y = 0; y < currentPiece.shape.length; y++) {
+                for (let x = 0; x < currentPiece.shape[y].length; x++) {
+                    if (currentPiece.shape[y][x]) {
+                        const boardY = currentPiece.y + y;
+                        const boardX = currentPiece.x + x;
+                        
+                        if (boardY >= 0) {
+                            board[boardY][boardX] = currentPiece.color;
+                        }
+                    }
+                }
+            }
+            
+            clearLines();
+            currentPiece = nextPiece;
+            nextPiece = generatePiece();
+            
+            // Check for privatization availability (every 15-25 pieces, gets rarer as level increases)
+            privatizationCounter++;
+            const baseRequirement = 15 + Math.floor(level / 3) * 5; // Gets harder every 3 levels
+            const randomRange = 10 + Math.floor(level / 2) * 3; // Wider range at higher levels
+            const requiredPieces = baseRequirement + Math.floor(Math.random() * randomRange);
+            
+            if (privatizationCounter >= requiredPieces) {
+                privatizationAvailable++;
+                privatizationCounter = 0;
+                updatePrivatizationDisplay();
+            }
+            
+            if (!isValidPosition(currentPiece)) {
+                gameOver();
+            }
+        }
+        
+        function clearLines() {
+            let linesCleared = 0;
+            
+            for (let y = ROWS - 1; y >= 0; y--) {
+                if (board[y].every(cell => cell !== 0)) {
+                    board.splice(y, 1);
+                    board.unshift(Array(COLS).fill(0));
+                    linesCleared++;
+                    y++; // Check the same row again
+                }
+            }
+            
+            if (linesCleared > 0) {
+                const points = [0, 40, 100, 300, 1200][linesCleared] * (level + 1);
+                score += points;
+                lines += linesCleared;
+                level = Math.floor(lines / 10) + 1;
+                dropInterval = Math.max(50, 1000 - (level - 1) * 50);
+                
+                updateScore();
+            }
+        }
+        
+        function privatizationClear() {
+            if (privatizationAvailable <= 0) return;
+            
+            // Find the bottom-most complete or nearly complete lines
+            let linesRemoved = 0;
+            for (let y = ROWS - 1; y >= 0 && linesRemoved < 3; y--) {
+                const filledBlocks = board[y].filter(cell => cell !== 0).length;
+                if (filledBlocks >= 7) { // Clear lines that are 70% or more full
+                    board.splice(y, 1);
+                    board.unshift(Array(COLS).fill(0));
+                    linesRemoved++;
+                    y++; // Check the same row again
+                }
+            }
+            
+            if (linesRemoved > 0) {
+                score += linesRemoved * 150; // Bonus points for privatization
+                updateScore();
+            }
+            
+            privatizationAvailable--;
+            updatePrivatizationDisplay();
+        }
+        
+        function updatePrivatizationDisplay() {
+            const indicator = document.getElementById('privatizationReady');
+            const countSpan = document.getElementById('privatizationCount');
+            
+            countSpan.textContent = `Available: ${privatizationAvailable}`;
+            
+            if (privatizationAvailable > 0) {
+                indicator.classList.add('active');
+            } else {
+                indicator.classList.remove('active');
+            }
+        }
+        
+        function drawBlock(x, y, color, context = ctx) {
+            const pixelX = x * BLOCK_SIZE;
+            const pixelY = y * BLOCK_SIZE;
+            
+            context.fillStyle = color;
+            context.fillRect(pixelX, pixelY, BLOCK_SIZE, BLOCK_SIZE);
+            
+            // Add a subtle border
+            context.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            context.lineWidth = 1;
+            context.strokeRect(pixelX, pixelY, BLOCK_SIZE, BLOCK_SIZE);
+        }
+        
+        function drawBoard() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw placed pieces
+            for (let y = 0; y < ROWS; y++) {
+                for (let x = 0; x < COLS; x++) {
+                    if (board[y][x]) {
+                        drawBlock(x, y, board[y][x]);
+                    }
+                }
+            }
+            
+            // Draw current piece
+            if (currentPiece && gameRunning) {
+                for (let y = 0; y < currentPiece.shape.length; y++) {
+                    for (let x = 0; x < currentPiece.shape[y].length; x++) {
+                        if (currentPiece.shape[y][x]) {
+                            drawBlock(currentPiece.x + x, currentPiece.y + y, currentPiece.color);
+                        }
+                    }
+                }
+            }
+            
+            // Draw grid lines
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.lineWidth = 1;
+            for (let x = 0; x <= COLS; x++) {
+                ctx.beginPath();
+                ctx.moveTo(x * BLOCK_SIZE, 0);
+                ctx.lineTo(x * BLOCK_SIZE, canvas.height);
+                ctx.stroke();
+            }
+            for (let y = 0; y <= ROWS; y++) {
+                ctx.beginPath();
+                ctx.moveTo(0, y * BLOCK_SIZE);
+                ctx.lineTo(canvas.width, y * BLOCK_SIZE);
+                ctx.stroke();
+            }
+        }
+        
+        function drawNextPiece() {
+            nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
+            
+            if (nextPiece) {
+                const blockSize = 15;
+                const offsetX = (nextCanvas.width - nextPiece.shape[0].length * blockSize) / 2;
+                const offsetY = (nextCanvas.height - nextPiece.shape.length * blockSize) / 2;
+                
+                for (let y = 0; y < nextPiece.shape.length; y++) {
+                    for (let x = 0; x < nextPiece.shape[y].length; x++) {
+                        if (nextPiece.shape[y][x]) {
+                            nextCtx.fillStyle = nextPiece.color;
+                            nextCtx.fillRect(
+                                offsetX + x * blockSize, 
+                                offsetY + y * blockSize, 
+                                blockSize, 
+                                blockSize
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        
+        function updateScore() {
+            document.getElementById('score').textContent = score;
+            document.getElementById('level').textContent = level;
+        }
+        
+        function gameOver() {
+            gameRunning = false;
+            document.getElementById('finalScore').textContent = 'Final Score: ' + score;
+            document.getElementById('gameOver').style.display = 'block';
+        }
+        
+        function restartGame() {
+            board = Array(ROWS).fill().map(() => Array(COLS).fill(0));
+            score = 0;
+            level = 1;
+            lines = 0;
+            dropInterval = 1000;
+            gameRunning = true;
+            privatizationAvailable = 0;
+            privatizationCounter = 0;
+            
+            currentPiece = generatePiece();
+            nextPiece = generatePiece();
+            
+            document.getElementById('gameOver').style.display = 'none';
+            updatePrivatizationDisplay();
+            updateScore();
+        }
+        
+        // Game loop
+        function gameLoop(timestamp) {
+            if (!gameRunning) {
+                requestAnimationFrame(gameLoop);
+                return;
+            }
+            
+            if (timestamp - dropTime > dropInterval) {
+                if (currentPiece && isValidPosition(currentPiece, 0, 1)) {
+                    currentPiece.y++;
+                } else if (currentPiece) {
+                    placePiece();
+                }
+                dropTime = timestamp;
+            }
+            
+            drawBoard();
+            drawNextPiece();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Controls
+        document.addEventListener('keydown', (e) => {
+            if (!gameRunning || !currentPiece) return;
+            
+            switch(e.key.toLowerCase()) {
+                case 'a':
+                case 'arrowleft':
+                    e.preventDefault();
+                    if (isValidPosition(currentPiece, -1, 0)) {
+                        currentPiece.x--;
+                    }
+                    break;
+                case 'd':
+                case 'arrowright':
+                    e.preventDefault();
+                    if (isValidPosition(currentPiece, 1, 0)) {
+                        currentPiece.x++;
+                    }
+                    break;
+                case 's':
+                case 'arrowdown':
+                    e.preventDefault();
+                    if (isValidPosition(currentPiece, 0, 1)) {
+                        currentPiece.y++;
+                        score++;
+                        updateScore();
+                    }
+                    break;
+                case 'w':
+                case 'arrowup':
+                    e.preventDefault();
+                    const rotated = rotatePiece(currentPiece);
+                    if (isValidPosition(rotated)) {
+                        currentPiece = rotated;
+                    }
+                    break;
+                case ' ':
+                    e.preventDefault();
+                    privatizationClear();
+                    break;
+            }
+        });
+        
+        // Make canvas focusable and auto-focus on click
+        canvas.tabIndex = 0;
+        canvas.addEventListener('click', () => {
+            canvas.focus();
+        });
+        
+        // Auto-focus when page loads
+        window.addEventListener('load', () => {
+            canvas.focus();
+        });
+        
+        // Initialize game
+        currentPiece = generatePiece();
+        nextPiece = generatePiece();
+        updateScore();
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
